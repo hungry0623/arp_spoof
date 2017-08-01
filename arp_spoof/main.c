@@ -5,6 +5,12 @@
 #include <string.h>
 #include <arpa/inet.h>
 #include <stdlib.h>
+#include <net/if.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <sys/ioctl.h>
+#include <linux/if.h>
+#include <netdb.h>
 
 #define ETHER_ADDR_LEN 6
 
@@ -24,7 +30,7 @@ struct sniff_ethernet {
     u_char arp_target_ip[4];
 };
 
-void getMyMacAddress(u_char *macAddress);
+void getMyMacAddress(u_char *my_mac);
 int main(int argc, char* argv[])
 {
     /*u_char arp_packet[42] = {0x00, 0x0c, 0x29, 0x1d, 0xa5, 0x3f, 0x00, 0x0c, 0x29, 0xd9, 0x27, 0x20, 0x08, 0x06, 0x00, 0x01,
@@ -42,7 +48,6 @@ int main(int argc, char* argv[])
     struct pcap_pkthdr *header;
     char *dev;
     char errbuf[PCAP_ERRBUF_SIZE];
-    char victim_mac[100] = {0};
     const u_char *p;
     int check = 0;
     int i = 0;
@@ -50,17 +55,19 @@ int main(int argc, char* argv[])
     unsigned int my_ip;
     unsigned int target_ip;
     unsigned int gw_ip;
-    unsigned int my_mac;
     char tmp[20] = {0};
+    u_char my_mac[6];
 
     m = fopen("/sys/class/net/eth0/address","r");
+
+    getMyMacAddress(my_mac);
 
     if(m)
     {
         fread(tmp, sizeof(tmp), 1, m);
     }
     //my_mac = inet_addr(tmp);
-    printf("%s\n", tmp);
+    //printf("%s\n", tmp);
 
     if(argc != 5)
     {
@@ -115,4 +122,46 @@ int main(int argc, char* argv[])
     printf("=========arp request=========\n");
 
     return 0;
+}
+
+void getMyMacAddress(u_char *my_mac)
+{
+    struct ifreq ifr;
+    struct ifconf ifc;
+    char buf[1024];
+    int success = 0;
+    int i = 0;
+
+    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
+    if (sock == -1) { /* handle error*/ };
+
+    ifc.ifc_len = sizeof(buf);
+    ifc.ifc_buf = buf;
+    if (ioctl(sock, SIOCGIFCONF, &ifc) == -1) { /* handle error */ }
+
+    struct ifreq* it = ifc.ifc_req;
+    const struct ifreq* const end = it + (ifc.ifc_len / sizeof(struct ifreq));
+
+    for (; it != end; ++it) {
+        strcpy(ifr.ifr_name, it->ifr_name);
+        if (ioctl(sock, SIOCGIFFLAGS, &ifr) == 0) {
+            if (! (ifr.ifr_flags & IFF_LOOPBACK)) { // don't count loopback
+                if (ioctl(sock, SIOCGIFHWADDR, &ifr) == 0) {
+                    success = 1;
+                    break;
+                }
+            }
+        }
+        else { /* handle error */ }
+    }
+
+    if (success)
+    {
+        memcpy(my_mac, ifr.ifr_hwaddr.sa_data, 6);
+    }
+
+    for(i = 0; i < 6; i++)
+    {
+        printf("%x:",my_mac[i]);
+    }
 }
